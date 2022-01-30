@@ -7,8 +7,6 @@ import './interfaces/IComptroller.sol';
 import './interfaces/ILiquidityMining.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 
-import 'hardhat/console.sol';
-
 pragma solidity 0.8.11;
 
 /**
@@ -268,15 +266,12 @@ contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
      * It supplies {want} Iron Bank to farm {IRON_BANK}
      */
     function deposit() public whenNotPaused {
-        console.log("deposit()");
         CErc20I(cWant).mint(balanceOfWant());
         uint256 _ltv = _calculateLTV();
 
         if (_shouldLeverage(_ltv)) {
-            console.log("_shouldLeverage(_ltv)");
             _leverMax();
         } else if (_shouldDeleverage(_ltv)) {
-            console.log("_shouldDeleverage(_ltv)");
             _deleverage(0);
         }
         updateBalance();
@@ -294,7 +289,6 @@ contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
      * @dev Calculates the balance of want held directly by the strategy
      */
     function balanceOfWant() public view returns (uint256) {
-        console.log("balanceOfWant(): ", IERC20(want).balanceOf(address(this)));
         return IERC20(want).balanceOf(address(this));
     }
 
@@ -357,11 +351,8 @@ contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
         //uint256 distributionPerBlock = ComptrollerI(unitroller).compSpeeds(address(cToken));
         (uint256 distributionPerBlock, , uint256 supplyEnd) = LIQUIDITY_MINING
             .rewardSupplySpeeds(IRON_BANK, address(cWant));
-        console.log("distributionPerBlock: ", distributionPerBlock);
-        console.log("supplyEnd: ", supplyEnd);
 
         if (supplyEnd < block.timestamp) {
-            console.log("supplyEnd < block.timestamp");
             return 0;
         }
 
@@ -408,7 +399,6 @@ contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
      * @dev Levers the strategy up to the targetLTV
      */
     function _leverMax() internal {
-        console.log("_leverMax()");
         uint256 supplied = cWant.balanceOfUnderlying(address(this));
         uint256 borrowed = cWant.borrowBalanceStored(address(this));
 
@@ -483,11 +473,8 @@ contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
      * to be used internally.
      */
     function _calculateLTV() internal returns (uint256 ltv) {
-        console.log("_calculateLTV()");
         uint256 supplied = cWant.balanceOfUnderlying(address(this));
         uint256 borrowed = cWant.borrowBalanceStored(address(this));
-        console.log("supplied: ", supplied);
-        console.log("borrowed: ", borrowed);
 
         if (supplied == 0 || borrowed == 0) {
             return 0;
@@ -669,7 +656,6 @@ contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
      * Get rewards from markets entered
      */
     function _claimRewards() internal {
-        console.log("_claimRewards()");
         if (LIQUIDITY_MINING.rewardTokensMap(IRON_BANK)) {
             address[] memory holders = new address[](1);
             holders[0] = address(this);
@@ -687,11 +673,7 @@ contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
      * Swaps {IRON_BANK} to {WFTM}
      */
     function _swapRewardsToWftm() internal {
-        console.log("_swapRewardsToWftm()");
         uint256 ironBankBalance = IERC20(IRON_BANK).balanceOf(address(this));
-        console.log("ironBankBalance: ", ironBankBalance);
-        console.log("ironBankToWFTMRoute[0]: ", ironBankToWFTMRoute[0]);
-        console.log("ironBankToWFTMRoute[1]: ", ironBankToWFTMRoute[1]);
         if (ironBankBalance >= minIronBankToSell) {
             IUniswapRouter(UNI_ROUTER).swapExactTokensForTokensSupportingFeeOnTransferTokens(
                 ironBankBalance,
