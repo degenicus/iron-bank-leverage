@@ -4,47 +4,51 @@ import './abstract/ReaperBaseStrategy.sol';
 import './interfaces/IUniswapRouter.sol';
 import './interfaces/CErc20I.sol';
 import './interfaces/IComptroller.sol';
+import './interfaces/ILiquidityMining.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
+
+import 'hardhat/console.sol';
 
 pragma solidity 0.8.11;
 
 /**
- * @dev This strategy will deposit and leverage a token on Scream to maximize yield by farming Scream tokens
+ * @dev This strategy will deposit and leverage a token in the Iron Bank to maximize yield by farming Iron Bank tokens
  */
-contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
+contract ReaperAutoCompoundIronBankLeverage is ReaperBaseStrategy {
     using SafeERC20 for IERC20;
 
     /**
      * @dev Tokens Used:
      * {WFTM} - Required for liquidity routing when doing swaps. Also used to charge fees on yield.
-     * {SCREAM} - The reward token for farming
+     * {IRON_BANK} - The reward token for farming
      * {want} - The vault token the strategy is maximizing
-     * {cWant} - The Scream version of the want token
+     * {cWant} - The Iron Bank version of the want token
      */
     address public constant WFTM = 0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83;
-    address public constant SCREAM = 0xe0654C8e6fd4D733349ac7E09f6f23DA256bF475;
+    address public constant IRON_BANK = 0x00a35FD824c717879BF370E70AC6868b95870Dfb;
     address public immutable want;
     CErc20I public immutable cWant;
 
     /**
      * @dev Third Party Contracts:
      * {UNI_ROUTER} - the UNI_ROUTER for target DEX
-     * {comptroller} - Scream contract to enter market and to claim Scream tokens
+     * {comptroller} - Iron Bank contract to enter market and to claim Iron Bank tokens
      */
     address public constant UNI_ROUTER = 0xF491e7B69E4244ad4002BC14e878a34207E38c29;
     IComptroller public immutable comptroller;
+    ILiquidityMining public constant LIQUIDITY_MINING = ILiquidityMining(0xa9d61326709B5C2D5897e0753998DFf7F1e974Fe);
 
     /**
      * @dev Routes we take to swap tokens
-     * {screamToWftmRoute} - Route we take to get from {SCREAM} into {WFTM}.
+     * {ironBankToWFTMRoute} - Route we take to get from {IRON_BANK} into {WFTM}.
      * {wftmToWantRoute} - Route we take to get from {WFTM} into {want}.
      */
-    address[] public screamToWftmRoute = [SCREAM, WFTM];
+    address[] public ironBankToWFTMRoute = [IRON_BANK, WFTM];
     address[] public wftmToWantRoute;
 
     /**
-     * @dev Scream variables
-     * {markets} - Contains the Scream tokens to farm, used to enter markets and claim Scream
+     * @dev Iron Bank variables
+     * {markets} - Contains the Iron Bank tokens to farm, used to enter markets and claim Iron Bank
      * {MANTISSA} - The unit used by the Compound protocol
      */
     address[] public markets;
@@ -54,7 +58,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      * @dev Strategy variables
      * {targetLTV} - The target loan to value for the strategy where 1 ether = 100%
      * {allowedLTVDrift} - How much the strategy can deviate from the target ltv where 0.01 ether = 1%
-     * {balanceOfPool} - The total balance deposited into Scream (supplied - borrowed)
+     * {balanceOfPool} - The total balance deposited into Iron Bank (supplied - borrowed)
      * {borrowDepth} - The maximum amount of loops used to leverage and deleverage
      * {minWantToLeverage} - The minimum amount of want to leverage in a loop
      */
@@ -64,7 +68,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
     uint256 public borrowDepth = 12;
     uint256 public minWantToLeverage = 1000;
     uint256 public constant MAX_BORROW_DEPTH = 15;
-    uint256 public minScreamToSell = 0.01 ether;
+    uint256 public minIronBankToSell = 0.01 ether;
 
     /**
      * @dev Initializes the strategy. Sets parameters, saves routes, and gives allowances.
@@ -89,7 +93,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
 
     /**
      * @dev Withdraws funds and sents them back to the vault.
-     * It withdraws {want} from Scream
+     * It withdraws {want} from Iron Bank
      * The available {want} minus fees is returned to the vault.
      */
     function withdraw(uint256 _withdrawAmount) external {
@@ -135,11 +139,11 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      *      Profit is denominated in WFTM, and takes fees into account.
      */
     function estimateHarvest() external view override returns (uint256 profit, uint256 callFeeToUser) {
-        uint256 rewards = predictScreamAccrued();
+        uint256 rewards = predictIronBankAccrued();
         if (rewards == 0) {
             return (0, 0);
         }
-        profit = IUniswapRouter(UNI_ROUTER).getAmountsOut(rewards, screamToWftmRoute)[1];
+        profit = IUniswapRouter(UNI_ROUTER).getAmountsOut(rewards, ironBankToWFTMRoute)[1];
         uint256 wftmFee = (profit * totalFee) / PERCENT_DIVISOR;
         callFeeToUser = (wftmFee * callFee) / PERCENT_DIVISOR;
         profit -= wftmFee;
@@ -150,8 +154,8 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      */
     function manualDeleverage(uint256 amount) external {
         _onlyStrategistOrOwner();
-        require(cWant.redeemUnderlying(amount) == 0, 'Scream returned an error');
-        require(cWant.repayBorrow(amount) == 0, 'Scream returned an error');
+        require(cWant.redeemUnderlying(amount) == 0, 'Iron Bank returned an error');
+        require(cWant.repayBorrow(amount) == 0, 'Iron Bank returned an error');
     }
 
     /**
@@ -159,7 +163,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      */
     function manualReleaseWant(uint256 amount) external {
         _onlyStrategistOrOwner();
-        require(cWant.redeemUnderlying(amount) == 0, 'Scream returned an error');
+        require(cWant.redeemUnderlying(amount) == 0, 'Iron Bank returned an error');
     }
 
     /**
@@ -198,9 +202,8 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      */
     function setMinScreamToSell(uint256 _minScreamToSell) external {
         _onlyStrategistOrOwner();
-        minScreamToSell = _minScreamToSell;
+        minIronBankToSell = _minScreamToSell;
     }
-
 
     /**
      * @dev Sets the minimum want to leverage/deleverage (loop) for
@@ -209,7 +212,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
         _onlyStrategistOrOwner();
         minWantToLeverage = _minWantToLeverage;
     }
-    
+
     /**
      * @dev Function that has to be called as part of strat migration. It sends all the available funds back to the
      * vault, ready to be migrated to the new strat.
@@ -226,7 +229,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
     }
 
     /**
-     * @dev Pauses supplied. Withdraws all funds from Scream, leaving rewards behind.
+     * @dev Pauses supplied. Withdraws all funds from Iron Bank, leaving rewards behind.
      */
     function panic() external {
         _onlyStrategistOrOwner();
@@ -262,15 +265,18 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
     /**
      * @dev Function that puts the funds to work.
      * It gets called whenever someone supplied in the strategy's vault contract.
-     * It supplies {want} Scream to farm {SCREAM}
+     * It supplies {want} Iron Bank to farm {IRON_BANK}
      */
     function deposit() public whenNotPaused {
+        console.log("deposit()");
         CErc20I(cWant).mint(balanceOfWant());
         uint256 _ltv = _calculateLTV();
 
         if (_shouldLeverage(_ltv)) {
+            console.log("_shouldLeverage(_ltv)");
             _leverMax();
         } else if (_shouldDeleverage(_ltv)) {
+            console.log("_shouldDeleverage(_ltv)");
             _deleverage(0);
         }
         updateBalance();
@@ -278,7 +284,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
 
     /**
      * @dev Calculates the total amount of {want} held by the strategy
-     * which is the balance of want + the total amount supplied to Scream.
+     * which is the balance of want + the total amount supplied to Iron Bank.
      */
     function balanceOf() public view override returns (uint256) {
         return balanceOfWant() + balanceOfPool;
@@ -288,6 +294,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      * @dev Calculates the balance of want held directly by the strategy
      */
     function balanceOfWant() public view returns (uint256) {
+        console.log("balanceOfWant(): ", IERC20(want).balanceOf(address(this)));
         return IERC20(want).balanceOf(address(this));
     }
 
@@ -322,7 +329,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
     }
 
     /**
-     * @dev Returns the current position in Scream. Does not accrue interest
+     * @dev Returns the current position in Iron Bank. Does not accrue interest
      * so might not be accurate, but the cWant is usually updated.
      */
     function getCurrentPosition() public view returns (uint256 supplied, uint256 borrowed) {
@@ -333,10 +340,10 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
     }
 
     /**
-     * @dev This function makes a prediction on how much {SCREAM} is accrued.
+     * @dev This function makes a prediction on how much {IRON_BANK} is accrued.
      *      It is not 100% accurate as it uses current balances in Compound to predict into the past.
      */
-    function predictScreamAccrued() public view returns (uint256) {
+    function predictIronBankAccrued() public view returns (uint256) {
         // Has no previous log to compare harvest time to
         if (harvestLog.length == 0) {
             return 0;
@@ -346,24 +353,34 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
             return 0; // should be impossible to have 0 balance and positive comp accrued
         }
 
-        uint256 distributionPerBlock = comptroller.compSpeeds(address(cWant));
+        //comp speed is amount to borrow or deposit (so half the total distribution for want)
+        //uint256 distributionPerBlock = ComptrollerI(unitroller).compSpeeds(address(cToken));
+        (uint256 distributionPerBlock, , uint256 supplyEnd) = LIQUIDITY_MINING
+            .rewardSupplySpeeds(IRON_BANK, address(cWant));
+        console.log("distributionPerBlock: ", distributionPerBlock);
+        console.log("supplyEnd: ", supplyEnd);
+
+        if (supplyEnd < block.timestamp) {
+            console.log("supplyEnd < block.timestamp");
+            return 0;
+        }
+
+        
 
         uint256 totalBorrow = cWant.totalBorrows();
 
         //total supply needs to be exchanged to underlying using exchange rate
         uint256 totalSupplyCtoken = cWant.totalSupply();
-        uint256 totalSupply = totalSupplyCtoken
-            * cWant.exchangeRateStored()
-            / MANTISSA;
+        uint256 totalSupply = (totalSupplyCtoken * cWant.exchangeRateStored()) / MANTISSA;
 
         uint256 blockShareSupply = 0;
         if (totalSupply > 0) {
-            blockShareSupply = supplied * distributionPerBlock / totalSupply;
+            blockShareSupply = (supplied * distributionPerBlock) / totalSupply;
         }
 
         uint256 blockShareBorrow = 0;
         if (totalBorrow > 0) {
-            blockShareBorrow = borrowed * distributionPerBlock / totalBorrow;
+            blockShareBorrow = (borrowed * distributionPerBlock) / totalBorrow;
         }
 
         //how much we expect to earn per block
@@ -391,6 +408,7 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      * @dev Levers the strategy up to the targetLTV
      */
     function _leverMax() internal {
+        console.log("_leverMax()");
         uint256 supplied = cWant.balanceOfUnderlying(address(this));
         uint256 borrowed = cWant.borrowBalanceStored(address(this));
 
@@ -465,8 +483,11 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      * to be used internally.
      */
     function _calculateLTV() internal returns (uint256 ltv) {
+        console.log("_calculateLTV()");
         uint256 supplied = cWant.balanceOfUnderlying(address(this));
         uint256 borrowed = cWant.borrowBalanceStored(address(this));
+        console.log("supplied: ", supplied);
+        console.log("borrowed: ", borrowed);
 
         if (supplied == 0 || borrowed == 0) {
             return 0;
@@ -629,8 +650,8 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
     /**
      * @dev Core function of the strat, in charge of collecting and re-investing rewards.
      * @notice Assumes the deposit will take care of the TVL rebalancing.
-     * 1. Claims {SCREAM} from the comptroller.
-     * 2. Swaps {SCREAM} to {WFTM}.
+     * 1. Claims {IRON_BANK} from the comptroller.
+     * 2. Swaps {IRON_BANK} to {WFTM}.
      * 3. Claims fees for the harvest caller and treasury.
      * 4. Swaps the {WFTM} token for {want}
      * 5. Deposits.
@@ -648,23 +669,34 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      * Get rewards from markets entered
      */
     function _claimRewards() internal {
-        CTokenI[] memory tokens = new CTokenI[](1);
-        tokens[0] = cWant;
+        console.log("_claimRewards()");
+        if (LIQUIDITY_MINING.rewardTokensMap(IRON_BANK)) {
+            address[] memory holders = new address[](1);
+            holders[0] = address(this);
+            address[] memory tokens = new address[](1);
+            tokens[0] = address(cWant);
+            address[] memory rewards = new address[](1);
+            rewards[0] = IRON_BANK;
 
-        comptroller.claimComp(address(this), tokens);
+            LIQUIDITY_MINING.claimRewards(holders, tokens, rewards, false, true);
+        }
     }
 
     /**
      * @dev Core harvest function.
-     * Swaps {SCREAM} to {WFTM}
+     * Swaps {IRON_BANK} to {WFTM}
      */
     function _swapRewardsToWftm() internal {
-        uint256 screamBalance = IERC20(SCREAM).balanceOf(address(this));
-        if (screamBalance >= minScreamToSell) {
+        console.log("_swapRewardsToWftm()");
+        uint256 ironBankBalance = IERC20(IRON_BANK).balanceOf(address(this));
+        console.log("ironBankBalance: ", ironBankBalance);
+        console.log("ironBankToWFTMRoute[0]: ", ironBankToWFTMRoute[0]);
+        console.log("ironBankToWFTMRoute[1]: ", ironBankToWFTMRoute[1]);
+        if (ironBankBalance >= minIronBankToSell) {
             IUniswapRouter(UNI_ROUTER).swapExactTokensForTokensSupportingFeeOnTransferTokens(
-                screamBalance,
+                ironBankBalance,
                 0,
-                screamToWftmRoute,
+                ironBankToWFTMRoute,
                 address(this),
                 block.timestamp + 600
             );
@@ -694,6 +726,9 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
      * Swaps {WFTM} for {want}
      */
     function _swapToWant() internal {
+        if (want == WFTM) {
+            return;
+        }
         uint256 wftmBalance = IERC20(WFTM).balanceOf(address(this));
         if (wftmBalance != 0) {
             IUniswapRouter(UNI_ROUTER).swapExactTokensForTokensSupportingFeeOnTransferTokens(
@@ -718,9 +753,9 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
             UNI_ROUTER,
             type(uint256).max - IERC20(WFTM).allowance(address(this), UNI_ROUTER)
         );
-        IERC20(SCREAM).safeIncreaseAllowance(
+        IERC20(IRON_BANK).safeIncreaseAllowance(
             UNI_ROUTER,
-            type(uint256).max - IERC20(SCREAM).allowance(address(this), UNI_ROUTER)
+            type(uint256).max - IERC20(IRON_BANK).allowance(address(this), UNI_ROUTER)
         );
     }
 
@@ -730,6 +765,6 @@ contract ReaperAutoCompoundScreamLeverage is ReaperBaseStrategy {
     function _removeAllowances() internal {
         IERC20(want).safeDecreaseAllowance(address(cWant), IERC20(want).allowance(address(this), address(cWant)));
         IERC20(WFTM).safeDecreaseAllowance(UNI_ROUTER, IERC20(WFTM).allowance(address(this), UNI_ROUTER));
-        IERC20(SCREAM).safeDecreaseAllowance(UNI_ROUTER, IERC20(SCREAM).allowance(address(this), UNI_ROUTER));
+        IERC20(IRON_BANK).safeDecreaseAllowance(UNI_ROUTER, IERC20(IRON_BANK).allowance(address(this), UNI_ROUTER));
     }
 }
